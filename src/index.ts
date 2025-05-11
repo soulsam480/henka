@@ -1,12 +1,9 @@
-// deno-lint-ignore-file no-explicit-any
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { parseFeed } from "@mikaelporttila/rss";
-
-import { JSONPath } from "@stdext/json";
+import { parseRssFeed } from "feedsmith";
+import { JSONPath } from "jsonpath-plus";
 
 function safeParseJSON(string: string): any {
 	try {
@@ -44,23 +41,18 @@ const paramsSchema = makeSearchParamsObjSchema(
 	}),
 );
 
-const secret = Deno.env.get("APP_SECRET");
+type Bindings = {
+	APP_SECRET: string;
+	APP_ENV: string;
+};
 
-const app = new Hono();
-
-if (Deno.env.get("DENO_ENV") === "development") {
-	app.use(logger());
-}
+const app = new Hono<{ Bindings: Bindings }>();
 
 app.use(async (ctx, next) => {
 	const authKey = ctx.req.header("X-Auth-Key");
 
-	if (authKey !== secret && Deno.env.get("DENO_ENV") !== "development") {
-		const response = new Response("Invalid request", {
-			status: 401,
-		});
-
-		throw new HTTPException(401, { res: response });
+	if (authKey !== ctx.env.APP_SECRET && ctx.env.APP_ENV !== "development") {
+		throw new HTTPException(401, { message: "Invalid request" });
 	}
 
 	await next();
@@ -76,30 +68,49 @@ app.use(
 );
 
 app.get("/api/parse", async (c) => {
-	const { searchParams } = new URL(c.req.url);
-	const values = await paramsSchema.safeParseAsync(searchParams);
+	try {
+		const { searchParams } = new URL(c.req.url);
+		const values = await paramsSchema.safeParseAsync(searchParams);
 
-	if (!values.success) {
-		c.status(400);
-		return c.json(values.error);
+		if (!values.success) {
+			c.status(400);
+			return c.json(values.error);
+		}
+
+		const { jq = "", url } = values.data;
+
+		const response = await fetch(url);
+
+		if (!response.ok) {
+			c.status(400);
+			return c.text(response.statusText);
+		}
+
+		const xml = await response.text();
+
+		const feed = parseRssFeed(xml);
+
+		if (jq.length === 0) {
+			return c.json(feed);
+		}
+		console.log(jq);
+
+		const result = JSONPath(
+			jq,
+			feed,
+			() => {
+				//
+			},
+			() => {
+				//
+			},
+		);
+
+		return c.json(result);
+	} catch (error) {
+		c.status(500);
+		return c.json(error?.toString());
 	}
-
-	const { jq = "", url } = values.data;
-
-	const response = await fetch(url);
-	const xml = await response.text();
-
-	const feed = await parseFeed(xml);
-
-	if (jq.length === 0) {
-		return c.json(feed);
-	}
-
-	const jp = new JSONPath(feed);
-
-	const result = jp.query(jq);
-
-	return c.json(result);
 });
 
-Deno.serve(app.fetch);
+export default app;
