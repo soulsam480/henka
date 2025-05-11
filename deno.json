@@ -1,0 +1,17 @@
+{
+	"imports": {
+		"@mikaelporttila/rss": "jsr:@mikaelporttila/rss@^1.1.2",
+		"@stdext/json": "jsr:@stdext/json@^0.1.0",
+		"hono": "jsr:@hono/hono@^4.7.9",
+		"zod": "npm:zod@^3.24.4"
+	},
+	"tasks": {
+		"dev": "deno run --watch --allow-net --allow-env --env-file main.ts",
+		"start": "deno run --allow-net --allow-env main.ts"
+	},
+	"compilerOptions": {
+		"jsx": "precompile",
+		"jsxImportSource": "hono/jsx"
+	}
+}
+
